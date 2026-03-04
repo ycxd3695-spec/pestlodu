@@ -35,22 +35,9 @@ function checkAuth() {
     return;
   }
 
-  // Verify session with server
-  apiRequest('GET', '/api/auth/me').then(data => {
-    if (!data.success) {
-      localStorage.removeItem('authToken');
-      localStorage.removeItem('user');
-      window.location.href = '/login.html';
-      return;
-    }
-    currentUser = data.user;
-    setupUI();
-    fetchTokens();
-  }).catch(() => {
-    // If server unreachable, still try to show UI
-    setupUI();
-    fetchTokens();
-  });
+  // Use stored user info directly (stateless auth - no need to verify with server)
+  setupUI();
+  fetchTokens();
 }
 
 function setupUI() {
@@ -117,13 +104,19 @@ async function apiRequest(method, url, body = null) {
 // ==================== AUTH ====================
 
 async function handleLogout() {
-  try {
-    await apiRequest('POST', '/api/auth/logout');
-  } catch (e) {
-    // Ignore errors
-  }
+  // Clear local storage first, then redirect immediately
+  const token = localStorage.getItem('authToken');
   localStorage.removeItem('authToken');
   localStorage.removeItem('user');
+  
+  // Try API logout in background, don't wait
+  if (token) {
+    fetch('/api/auth/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
+    }).catch(() => {});
+  }
+
   window.location.href = '/login.html';
 }
 
