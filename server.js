@@ -16,8 +16,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // ==================== IN-MEMORY STATE ====================
 
-// Sessions store
-const sessions = {};
+// Secret for token signing
+const AUTH_SECRET = 'tms_secret_key_2026';
 
 // Users
 const USERS = [
@@ -283,6 +283,26 @@ async function saveTokensToPastebin(tokens) {
 
 // ==================== AUTH MIDDLEWARE ====================
 
+function generateAuthToken(user) {
+  const payload = JSON.stringify(user);
+  const encoded = Buffer.from(payload).toString('base64');
+  const signature = crypto.createHmac('sha256', AUTH_SECRET).update(encoded).digest('hex');
+  return `${encoded}.${signature}`;
+}
+
+function verifyAuthToken(token) {
+  try {
+    const [encoded, signature] = token.split('.');
+    if (!encoded || !signature) return null;
+    const expectedSig = crypto.createHmac('sha256', AUTH_SECRET).update(encoded).digest('hex');
+    if (signature !== expectedSig) return null;
+    const payload = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8'));
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
 function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -290,12 +310,12 @@ function authenticate(req, res, next) {
   }
 
   const token = authHeader.split(' ')[1];
-  const session = sessions[token];
-  if (!session) {
+  const user = verifyAuthToken(token);
+  if (!user) {
     return res.status(401).json({ success: false, message: 'Invalid or expired session' });
   }
 
-  req.user = session.user;
+  req.user = user;
   req.sessionToken = token;
   next();
 }
@@ -326,7 +346,6 @@ app.post('/api/auth/login', (req, res) => {
     return res.status(401).json({ success: false, message: 'Invalid username or password' });
   }
 
-  const sessionToken = crypto.randomBytes(32).toString('hex');
   const userInfo = {
     id: user.id,
     username: user.username,
@@ -334,23 +353,19 @@ app.post('/api/auth/login', (req, res) => {
     displayName: user.displayName
   };
 
-  sessions[sessionToken] = {
-    user: userInfo,
-    createdAt: new Date().toISOString()
-  };
+  const authToken = generateAuthToken(userInfo);
 
   console.log(`[Auth] User '${user.username}' logged in (${user.role})`);
 
   res.json({
     success: true,
     message: 'Login successful',
-    token: sessionToken,
+    token: authToken,
     user: userInfo
   });
 });
 
 app.post('/api/auth/logout', authenticate, (req, res) => {
-  delete sessions[req.sessionToken];
   console.log(`[Auth] User '${req.user.username}' logged out`);
   res.json({ success: true, message: 'Logged out successfully' });
 });
