@@ -95,27 +95,89 @@ function tokensToText(tokens) {
   }).join('\n');
 }
 
+// Find the latest paste key by listing user's pastes
+async function findLatestPasteKey() {
+  const apiKey = process.env.PASTEBIN_API_KEY;
+  const userKey = process.env.PASTEBIN_USER_KEY || '';
+  const pasteName = process.env.PASTEBIN_PASTE_KEY || 'token_data';
+
+  if (!apiKey || !userKey) return null;
+
+  try {
+    const response = await axios.post('https://pastebin.com/api/api_post.php', new URLSearchParams({
+      api_dev_key: apiKey,
+      api_user_key: userKey,
+      api_option: 'list',
+      api_results_limit: '100'
+    }).toString(), {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      timeout: 10000
+    });
+
+    const xml = response.data;
+    if (!xml || typeof xml !== 'string' || xml.includes('No pastes found')) return null;
+
+    // Parse XML to find paste with matching name
+    const pasteBlocks = xml.split('<paste>').slice(1);
+    let latestKey = null;
+    let latestDate = 0;
+
+    for (const block of pasteBlocks) {
+      const nameMatch = block.match(/<paste_title>(.*?)<\/paste_title>/);
+      const keyMatch = block.match(/<paste_key>(.*?)<\/paste_key>/);
+      const dateMatch = block.match(/<paste_date>(.*?)<\/paste_date>/);
+
+      if (nameMatch && keyMatch && nameMatch[1] === pasteName) {
+        const date = parseInt(dateMatch ? dateMatch[1] : '0');
+        if (date >= latestDate) {
+          latestDate = date;
+          latestKey = keyMatch[1];
+        }
+      }
+    }
+
+    if (latestKey) {
+      console.log(`[Pastebin] Found latest paste key: ${latestKey}`);
+    }
+    return latestKey;
+  } catch (error) {
+    console.error('[Pastebin] List pastes error:', error.message);
+    return null;
+  }
+}
+
 async function fetchTokensFromPastebin() {
   const now = Date.now();
   if (tokenCache.data !== null && (now - tokenCache.lastFetch) < tokenCache.ttl) {
     return tokenCache.data;
   }
 
-  const pasteKey = process.env.PASTEBIN_PASTE_KEY;
-  if (!pasteKey || pasteKey === 'paste_key_to_read_and_update') {
-    console.log('[Pastebin] No paste key configured, returning empty array');
+  const apiKey = process.env.PASTEBIN_API_KEY;
+  if (!apiKey || apiKey === 'your_pastebin_api_dev_key') {
+    console.log('[Pastebin] No API key configured, returning empty array');
     tokenCache.data = [];
     tokenCache.lastFetch = now;
     return [];
   }
 
   try {
+    // First try to find the latest paste by listing user's pastes
+    const latestKey = await findLatestPasteKey();
+    const pasteKey = latestKey || process.env.PASTEBIN_PASTE_KEY;
+
+    if (!pasteKey || pasteKey === 'paste_key_to_read_and_update') {
+      console.log('[Pastebin] No paste found, returning empty array');
+      tokenCache.data = [];
+      tokenCache.lastFetch = now;
+      return [];
+    }
+
     const url = `https://pastebin.com/raw/${pasteKey}`;
     const response = await axios.get(url, { timeout: 10000 });
     const tokens = parseTokensFromText(response.data);
     tokenCache.data = tokens;
     tokenCache.lastFetch = now;
-    console.log(`[Pastebin] Fetched ${tokens.length} tokens`);
+    console.log(`[Pastebin] Fetched ${tokens.length} tokens from paste ${pasteKey}`);
     return tokens;
   } catch (error) {
     if (error.response && error.response.status === 404) {
@@ -133,6 +195,7 @@ async function fetchTokensFromPastebin() {
 async function saveTokensToPastebin(tokens) {
   const apiKey = process.env.PASTEBIN_API_KEY;
   const userKey = process.env.PASTEBIN_USER_KEY || '';
+  const pasteName = process.env.PASTEBIN_PASTE_KEY || 'token_data';
 
   if (!apiKey || apiKey === 'your_pastebin_api_dev_key') {
     console.log('[Pastebin] No API key configured, storing in cache only');
@@ -144,31 +207,51 @@ async function saveTokensToPastebin(tokens) {
   const textContent = tokensToText(tokens);
 
   try {
-    // Try to delete old paste first if we have a paste key
-    const oldPasteKey = process.env.PASTEBIN_PASTE_KEY;
-    if (oldPasteKey && oldPasteKey !== 'paste_key_to_read_and_update' && userKey) {
+    // Delete ALL old pastes with same name first
+    if (userKey) {
       try {
-        await axios.post('https://pastebin.com/api/api_post.php', new URLSearchParams({
+        const listResp = await axios.post('https://pastebin.com/api/api_post.php', new URLSearchParams({
           api_dev_key: apiKey,
-          api_option: 'delete',
-          api_paste_key: oldPasteKey,
-          api_user_key: userKey
+          api_user_key: userKey,
+          api_option: 'list',
+          api_results_limit: '100'
         }).toString(), {
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           timeout: 10000
         });
-      } catch (e) {
-        // Ignore delete errors
-      }
+
+        const xml = listResp.data;
+        if (xml && typeof xml === 'string' && !xml.includes('No pastes found')) {
+          const pasteBlocks = xml.split('<paste>').slice(1);
+          for (const block of pasteBlocks) {
+            const nameMatch = block.match(/<paste_title>(.*?)<\/paste_title>/);
+            const keyMatch = block.match(/<paste_key>(.*?)<\/paste_key>/);
+            if (nameMatch && keyMatch && nameMatch[1] === pasteName) {
+              try {
+                await axios.post('https://pastebin.com/api/api_post.php', new URLSearchParams({
+                  api_dev_key: apiKey,
+                  api_option: 'delete',
+                  api_paste_key: keyMatch[1],
+                  api_user_key: userKey
+                }).toString(), {
+                  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                  timeout: 10000
+                });
+                console.log(`[Pastebin] Deleted old paste: ${keyMatch[1]}`);
+              } catch (e) { /* ignore */ }
+            }
+          }
+        }
+      } catch (e) { /* ignore list errors */ }
     }
 
-    // Create new paste
+    // Create new paste with same name
     const params = new URLSearchParams({
       api_dev_key: apiKey,
       api_option: 'paste',
       api_paste_code: textContent || ' ',
       api_paste_private: '1',
-      api_paste_name: 'n7CrR1Mv',
+      api_paste_name: pasteName,
       api_paste_format: 'text'
     });
 
@@ -181,11 +264,9 @@ async function saveTokensToPastebin(tokens) {
       timeout: 10000
     });
 
-    // Response is the paste URL like https://pastebin.com/XXXXX
     const newPasteUrl = response.data;
     if (newPasteUrl && newPasteUrl.includes('pastebin.com/')) {
       const newKey = newPasteUrl.split('/').pop();
-      process.env.PASTEBIN_PASTE_KEY = newKey;
       console.log(`[Pastebin] Saved ${tokens.length} tokens. New paste key: ${newKey}`);
     }
 
@@ -194,7 +275,6 @@ async function saveTokensToPastebin(tokens) {
     return true;
   } catch (error) {
     console.error('[Pastebin] Save error:', error.response?.data || error.message);
-    // Still update cache so the app works
     tokenCache.data = tokens;
     tokenCache.lastFetch = Date.now();
     return false;
