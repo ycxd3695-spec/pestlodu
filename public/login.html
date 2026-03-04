@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login - Token Management System</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <style>
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+      20%, 40%, 60%, 80% { transform: translateX(5px); }
+    }
+    .shake { animation: shake 0.6s ease-in-out; }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .fade-in { animation: fadeIn 0.6s ease-out; }
+    @keyframes pulse-glow {
+      0%, 100% { box-shadow: 0 0 20px rgba(99, 102, 241, 0.3); }
+      50% { box-shadow: 0 0 40px rgba(99, 102, 241, 0.6); }
+    }
+    .glass-card {
+      background: rgba(255, 255, 255, 0.15);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.25);
+    }
+    .login-bg {
+      background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 25%, #6366F1 50%, #8B5CF6 75%, #A855F7 100%);
+      min-height: 100vh;
+    }
+    .input-field {
+      background: rgba(255, 255, 255, 0.9);
+      backdrop-filter: blur(10px);
+      transition: all 0.3s ease;
+    }
+    .input-field:focus {
+      background: rgba(255, 255, 255, 1);
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.3);
+    }
+    .btn-login {
+      background: linear-gradient(135deg, #4F46E5, #7C3AED);
+      transition: all 0.3s ease;
+    }
+    .btn-login:hover {
+      background: linear-gradient(135deg, #4338CA, #6D28D9);
+      transform: translateY(-1px);
+      box-shadow: 0 10px 25px rgba(99, 102, 241, 0.4);
+    }
+    .btn-login:active { transform: translateY(0); }
+    .floating-shape {
+      position: absolute;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.05);
+      animation: float 6s ease-in-out infinite;
+    }
+    @keyframes float {
+      0%, 100% { transform: translateY(0px) rotate(0deg); }
+      50% { transform: translateY(-20px) rotate(180deg); }
+    }
+  </style>
+</head>
+<body class="login-bg flex items-center justify-center p-4 relative overflow-hidden">
+  <!-- Floating shapes -->
+  <div class="floating-shape w-72 h-72 -top-20 -left-20" style="animation-delay: 0s;"></div>
+  <div class="floating-shape w-96 h-96 -bottom-32 -right-32" style="animation-delay: 2s;"></div>
+  <div class="floating-shape w-48 h-48 top-1/4 right-1/4" style="animation-delay: 4s;"></div>
+
+  <div class="glass-card rounded-2xl p-8 w-full max-w-md fade-in relative z-10" id="loginCard">
+    <!-- Logo -->
+    <div class="text-center mb-8">
+      <div class="inline-flex items-center justify-center w-20 h-20 rounded-full bg-white/20 mb-4" style="animation: pulse-glow 2s infinite;">
+        <i class="fas fa-shield-halved text-4xl text-white"></i>
+      </div>
+      <h1 class="text-3xl font-bold text-white mb-2">Welcome Back</h1>
+      <p class="text-indigo-200 text-sm">Token Management System</p>
+    </div>
+
+    <!-- Error message -->
+    <div id="errorMsg" class="hidden bg-red-500/20 border border-red-400/30 text-red-100 px-4 py-3 rounded-lg mb-4 text-sm">
+      <i class="fas fa-exclamation-circle mr-2"></i>
+      <span id="errorText">Invalid credentials</span>
+    </div>
+
+    <!-- Login Form -->
+    <form id="loginForm" class="space-y-5">
+      <div>
+        <label class="block text-white/80 text-sm font-medium mb-2">
+          <i class="fas fa-user mr-1"></i> Username
+        </label>
+        <input type="text" id="username" required
+          class="input-field w-full px-4 py-3 rounded-xl border-0 text-gray-800 placeholder-gray-400 focus:outline-none text-sm"
+          placeholder="Enter your username" autocomplete="username">
+      </div>
+
+      <div>
+        <label class="block text-white/80 text-sm font-medium mb-2">
+          <i class="fas fa-lock mr-1"></i> Password
+        </label>
+        <div class="relative">
+          <input type="password" id="password" required
+            class="input-field w-full px-4 py-3 rounded-xl border-0 text-gray-800 placeholder-gray-400 focus:outline-none text-sm pr-12"
+            placeholder="Enter your password" autocomplete="current-password">
+          <button type="button" id="togglePassword"
+            class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition">
+            <i class="fas fa-eye" id="eyeIcon"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between">
+        <label class="flex items-center text-white/70 text-sm cursor-pointer">
+          <input type="checkbox" id="rememberMe" class="mr-2 rounded border-white/30">
+          Remember me
+        </label>
+      </div>
+
+      <button type="submit" id="loginBtn"
+        class="btn-login w-full py-3 rounded-xl text-white font-semibold text-sm flex items-center justify-center gap-2">
+        <span id="loginBtnText">Sign In</span>
+        <i class="fas fa-arrow-right" id="loginBtnIcon"></i>
+        <i class="fas fa-spinner fa-spin hidden" id="loginSpinner"></i>
+      </button>
+    </form>
+
+    <!-- Footer -->
+    <div class="text-center mt-6">
+      <p class="text-white/40 text-xs">
+        <i class="fas fa-database mr-1"></i> Powered by Pastebin Storage
+      </p>
+    </div>
+  </div>
+
+  <script>
+    const loginForm = document.getElementById('loginForm');
+    const usernameInput = document.getElementById('username');
+    const passwordInput = document.getElementById('password');
+    const errorMsg = document.getElementById('errorMsg');
+    const errorText = document.getElementById('errorText');
+    const loginCard = document.getElementById('loginCard');
+    const rememberMe = document.getElementById('rememberMe');
+    const togglePassword = document.getElementById('togglePassword');
+    const eyeIcon = document.getElementById('eyeIcon');
+    const loginBtnText = document.getElementById('loginBtnText');
+    const loginBtnIcon = document.getElementById('loginBtnIcon');
+    const loginSpinner = document.getElementById('loginSpinner');
+
+    // Check if already logged in
+    const existingToken = localStorage.getItem('authToken');
+    if (existingToken) {
+      window.location.href = '/index.html';
+    }
+
+    // Remember me - load saved username
+    const savedUsername = localStorage.getItem('rememberedUsername');
+    if (savedUsername) {
+      usernameInput.value = savedUsername;
+      rememberMe.checked = true;
+      passwordInput.focus();
+    } else {
+      usernameInput.focus();
+    }
+
+    // Toggle password visibility
+    togglePassword.addEventListener('click', () => {
+      const type = passwordInput.type === 'password' ? 'text' : 'password';
+      passwordInput.type = type;
+      eyeIcon.className = type === 'password' ? 'fas fa-eye' : 'fas fa-eye-slash';
+    });
+
+    // Login form submit
+    loginForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorMsg.classList.add('hidden');
+
+      const username = usernameInput.value.trim();
+      const password = passwordInput.value.trim();
+
+      if (!username || !password) {
+        showError('Please enter both username and password');
+        return;
+      }
+
+      // Loading state
+      loginBtnText.textContent = 'Signing in...';
+      loginBtnIcon.classList.add('hidden');
+      loginSpinner.classList.remove('hidden');
+
+      try {
+        const response = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+          // Save auth data
+          localStorage.setItem('authToken', data.token);
+          localStorage.setItem('user', JSON.stringify(data.user));
+
+          // Remember me
+          if (rememberMe.checked) {
+            localStorage.setItem('rememberedUsername', username);
+          } else {
+            localStorage.removeItem('rememberedUsername');
+          }
+
+          // Redirect to dashboard
+          window.location.href = '/index.html';
+        } else {
+          showError(data.message || 'Invalid credentials');
+          resetButton();
+        }
+      } catch (err) {
+        showError('Connection error. Please try again.');
+        resetButton();
+      }
+    });
+
+    function showError(message) {
+      errorText.textContent = message;
+      errorMsg.classList.remove('hidden');
+      loginCard.classList.add('shake');
+      setTimeout(() => loginCard.classList.remove('shake'), 600);
+    }
+
+    function resetButton() {
+      loginBtnText.textContent = 'Sign In';
+      loginBtnIcon.classList.remove('hidden');
+      loginSpinner.classList.add('hidden');
+    }
+  </script>
+</body>
+</html>
