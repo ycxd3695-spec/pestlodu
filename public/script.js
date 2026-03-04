@@ -97,8 +97,43 @@ async function apiRequest(method, url, body = null) {
     options.body = JSON.stringify(body);
   }
 
-  const response = await fetch(url, options);
-  return response.json();
+  try {
+    const response = await fetch(url, options);
+    const data = await response.json();
+    
+    // Handle auth errors
+    if (response.status === 401) {
+      showBanner('Session expired. Please login again.', 'error');
+      setTimeout(() => {
+        localStorage.removeItem('authToken');
+        localStorage.removeItem('user');
+        window.location.href = '/login.html';
+      }, 1500);
+      return { success: false, message: 'Session expired' };
+    }
+    
+    return data;
+  } catch (error) {
+    console.error(`[API] ${method} ${url} Error:`, error.message);
+    throw error;
+  }
+}
+
+// Button loading helper
+function setBtnLoading(btn, loading, originalHtml = '') {
+  if (!btn) return;
+  if (loading) {
+    btn._originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.style.opacity = '0.7';
+    btn.style.pointerEvents = 'none';
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Processing...';
+  } else {
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    btn.style.pointerEvents = 'auto';
+    btn.innerHTML = btn._originalHtml || originalHtml;
+  }
 }
 
 // ==================== AUTH ====================
@@ -233,6 +268,10 @@ async function addToken() {
     return;
   }
 
+  const btn = document.querySelector('[onclick="addToken()"]');
+  setBtnLoading(btn, true);
+  showBanner('Adding token...', 'info');
+
   try {
     const data = await apiRequest('POST', '/api/tokens', {
       name,
@@ -243,8 +282,7 @@ async function addToken() {
     });
 
     if (data.success) {
-      showBanner('Token added successfully!', 'success');
-      // Clear form
+      showBanner(`Token "${name}" added successfully!`, 'success');
       document.getElementById('tokenName').value = '';
       document.getElementById('tokenValue').value = '';
       if (currentUser.role !== 'admin') document.getElementById('tokenTag').value = '';
@@ -252,10 +290,16 @@ async function addToken() {
       setDefaultDate();
       await fetchTokens();
     } else {
-      showBanner(data.message || 'Failed to add token', 'error');
+      if (data.message && data.message.includes('already exists')) {
+        showBanner(`Duplicate! Token already exists${data.existingToken ? ' (Name: ' + data.existingToken + ')' : ''}`, 'error');
+      } else {
+        showBanner(data.message || 'Failed to add token. Please try again.', 'error');
+      }
     }
   } catch (error) {
-    showBanner('Connection error. Please try again.', 'error');
+    showBanner('Connection error: Could not reach server. Check your internet.', 'error');
+  } finally {
+    setBtnLoading(btn, false);
   }
 }
 
@@ -640,17 +684,19 @@ function deselectAll() {
 async function deleteToken(id, name) {
   if (!confirm(`Are you sure you want to delete token "${name}"?`)) return;
 
+  showBanner(`Deleting "${name}"...`, 'info');
+
   try {
     const data = await apiRequest('DELETE', `/api/tokens/${id}`);
     if (data.success) {
-      showBanner('Token deleted successfully!', 'success');
+      showBanner(`Token "${name}" deleted successfully!`, 'success');
       selectedTokenIds.delete(id);
       await fetchTokens();
     } else {
-      showBanner(data.message || 'Failed to delete token', 'error');
+      showBanner(`Failed to delete "${name}": ${data.message || 'Unknown error'}`, 'error');
     }
   } catch (error) {
-    showBanner('Connection error. Please try again.', 'error');
+    showBanner('Connection error: Could not delete token. Check your internet.', 'error');
   }
 }
 
@@ -659,8 +705,10 @@ async function deleteSelected() {
   if (count === 0) return;
   if (!confirm(`Are you sure you want to delete ${count} selected tokens?`)) return;
 
+  showBanner(`Deleting ${count} tokens...`, 'info');
   let success = 0;
   let failed = 0;
+  const total = count;
 
   for (const id of [...selectedTokenIds]) {
     try {
@@ -674,9 +722,10 @@ async function deleteSelected() {
     } catch {
       failed++;
     }
+    showBanner(`Deleting... ${success + failed}/${total} done`, 'info');
   }
 
-  showBanner(`Deleted: ${success} | Failed: ${failed}`, success > 0 ? 'success' : 'error');
+  showBanner(`Deleted: ${success} ✓ | Failed: ${failed} ✗`, success > 0 ? 'success' : 'error');
   await fetchTokens();
 }
 
@@ -724,6 +773,10 @@ async function saveEdit() {
     return;
   }
 
+  const btn = document.querySelector('[onclick="saveEdit()"]');
+  setBtnLoading(btn, true);
+  showBanner('Saving changes...', 'info');
+
   try {
     const data = await apiRequest('PUT', `/api/tokens/${id}`, {
       name,
@@ -734,14 +787,16 @@ async function saveEdit() {
     });
 
     if (data.success) {
-      showBanner('Token updated successfully!', 'success');
+      showBanner(`Token "${name}" updated successfully!`, 'success');
       closeEditModal();
       await fetchTokens();
     } else {
-      showBanner(data.message || 'Failed to update token', 'error');
+      showBanner(`Failed to update: ${data.message || 'Unknown error'}`, 'error');
     }
   } catch (error) {
-    showBanner('Connection error. Please try again.', 'error');
+    showBanner('Connection error: Could not save changes. Check your internet.', 'error');
+  } finally {
+    setBtnLoading(btn, false);
   }
 }
 
@@ -766,7 +821,9 @@ async function executeBulkTagUpdate() {
   if (!confirm(`Update tag to "${tag || 'No Tag'}" for ${selectedTokenIds.size} tokens?`)) return;
 
   closeBulkTagModal();
+  const total = selectedTokenIds.size;
   let success = 0, failed = 0;
+  showBanner(`Updating tags... 0/${total}`, 'info');
 
   for (const id of [...selectedTokenIds]) {
     try {
@@ -782,9 +839,10 @@ async function executeBulkTagUpdate() {
       if (data.success) success++;
       else failed++;
     } catch { failed++; }
+    showBanner(`Updating tags... ${success + failed}/${total}`, 'info');
   }
 
-  showBanner(`Tag updated: ${success} | Failed: ${failed}`, success > 0 ? 'success' : 'error');
+  showBanner(`Tag updated: ${success} ✓ | Failed: ${failed} ✗`, success > 0 ? 'success' : 'error');
   await fetchTokens();
 }
 
@@ -803,7 +861,9 @@ async function executeBulkCategoryUpdate() {
   if (!confirm(`Update category to "${category || 'No Category'}" for ${selectedTokenIds.size} tokens?`)) return;
 
   closeBulkCategoryModal();
+  const total = selectedTokenIds.size;
   let success = 0, failed = 0;
+  showBanner(`Updating categories... 0/${total}`, 'info');
 
   for (const id of [...selectedTokenIds]) {
     try {
@@ -819,9 +879,10 @@ async function executeBulkCategoryUpdate() {
       if (data.success) success++;
       else failed++;
     } catch { failed++; }
+    showBanner(`Updating categories... ${success + failed}/${total}`, 'info');
   }
 
-  showBanner(`Category updated: ${success} | Failed: ${failed}`, success > 0 ? 'success' : 'error');
+  showBanner(`Category updated: ${success} ✓ | Failed: ${failed} ✗`, success > 0 ? 'success' : 'error');
   await fetchTokens();
 }
 
@@ -850,7 +911,9 @@ async function executeBulkDateUpdate() {
 
   closeBulkDateModal();
   const isoDate = new Date(dateStr).toISOString();
+  const total = selectedTokenIds.size;
   let success = 0, failed = 0;
+  showBanner(`Updating dates... 0/${total}`, 'info');
 
   for (const id of [...selectedTokenIds]) {
     try {
@@ -866,9 +929,10 @@ async function executeBulkDateUpdate() {
       if (data.success) success++;
       else failed++;
     } catch { failed++; }
+    showBanner(`Updating dates... ${success + failed}/${total}`, 'info');
   }
 
-  showBanner(`Date updated: ${success} | Failed: ${failed}`, success > 0 ? 'success' : 'error');
+  showBanner(`Date updated: ${success} ✓ | Failed: ${failed} ✗`, success > 0 ? 'success' : 'error');
   await fetchTokens();
 }
 
@@ -985,7 +1049,11 @@ async function importWhatsApp() {
 
   if (!confirm(`Import ${parsedWhatsAppTokens.length} tokens?`)) return;
 
+  const btn = document.getElementById('importWhatsAppBtn');
+  setBtnLoading(btn, true);
+  const total = parsedWhatsAppTokens.length;
   let success = 0, failed = 0, duplicates = 0;
+  showBanner(`Importing WhatsApp tokens... 0/${total}`, 'info');
 
   for (const t of parsedWhatsAppTokens) {
     try {
@@ -1007,9 +1075,11 @@ async function importWhatsApp() {
     } catch {
       failed++;
     }
+    showBanner(`Importing... ${success + failed + duplicates}/${total}`, 'info');
   }
 
-  showBanner(`Imported: ${success} | Duplicates: ${duplicates} | Failed: ${failed}`, success > 0 ? 'success' : 'error');
+  setBtnLoading(btn, false);
+  showBanner(`Imported: ${success} ✓ | Duplicates: ${duplicates} | Failed: ${failed} ✗`, success > 0 ? 'success' : 'error');
 
   // Reset
   document.getElementById('whatsappText').value = '';
@@ -1103,7 +1173,11 @@ async function executeBulkDelete() {
   if (bulkDeleteMatchedIds.length === 0) return;
   if (!confirm(`Delete ${bulkDeleteMatchedIds.length} matched tokens? This cannot be undone.`)) return;
 
+  const btn = document.getElementById('executeBulkDeleteBtn');
+  setBtnLoading(btn, true);
+  const total = bulkDeleteMatchedIds.length;
   let success = 0, failed = 0;
+  showBanner(`Bulk deleting... 0/${total}`, 'info');
 
   for (const id of bulkDeleteMatchedIds) {
     try {
@@ -1111,9 +1185,11 @@ async function executeBulkDelete() {
       if (data.success) success++;
       else failed++;
     } catch { failed++; }
+    showBanner(`Bulk deleting... ${success + failed}/${total}`, 'info');
   }
 
-  showBanner(`Deleted: ${success} | Failed: ${failed}`, success > 0 ? 'success' : 'error');
+  setBtnLoading(btn, false);
+  showBanner(`Deleted: ${success} ✓ | Failed: ${failed} ✗`, success > 0 ? 'success' : 'error');
 
   // Reset
   document.getElementById('bulkDeleteText').value = '';
@@ -1210,7 +1286,9 @@ async function importJSON(event) {
 
       if (!confirm(`Import ${tokens.length} tokens from file?`)) return;
 
+      const total = tokens.length;
       let success = 0, failed = 0, duplicates = 0;
+      showBanner(`Importing JSON... 0/${total}`, 'info');
 
       for (const t of tokens) {
         try {
@@ -1232,9 +1310,10 @@ async function importJSON(event) {
         } catch {
           failed++;
         }
+        showBanner(`Importing... ${success + failed + duplicates}/${total}`, 'info');
       }
 
-      showBanner(`Imported: ${success} | Duplicates: ${duplicates} | Failed: ${failed}`, success > 0 ? 'success' : 'error');
+      showBanner(`Imported: ${success} ✓ | Duplicates: ${duplicates} | Failed: ${failed} ✗`, success > 0 ? 'success' : 'error');
       await fetchTokens();
     } catch {
       showBanner('Failed to parse JSON file', 'error');
